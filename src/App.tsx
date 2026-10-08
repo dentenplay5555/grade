@@ -13,8 +13,9 @@ import { LoginPage } from './components/LoginPage';
 import { DEFAULT_ROLES } from './lib/rbac';
 import { Problem, Submission, User, Role, Contest, ScoreboardRow } from './types';
 import { api } from './lib/api';
+import { supabase } from './lib/supabase';
 
-// Default system admin placeholder \u2014 replaced at runtime by api.auth.getCurrentUser()
+// Default system admin placeholder — replaced at runtime by api.auth.getCurrentUser()
 const DEFAULT_AVATAR = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%231e293b'/%3E%3Ccircle cx='20' cy='15' r='7' fill='%2364748b'/%3E%3Cellipse cx='20' cy='34' rx='12' ry='8' fill='%2364748b'/%3E%3C/svg%3E`;
 
 const INITIAL_SYSTEM_ADMIN: User = {
@@ -67,21 +68,110 @@ export const App: React.FC = () => {
     }).catch(() => {});
   };
 
-  // Auth check on mount — determine if user has an active session
+  // Auth check on mount & state changes
   useEffect(() => {
-    api.auth.getCurrentUser().then(user => {
-      if (user) {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (error) {
+        console.error('Failed to restore Supabase session:', error);
+        setIsAuthenticated(false);
+        return;
+      }
+
+      if (!session) {
+        setIsAuthenticated(false);
+        return;
+      }
+
+      try {
+        const user = await api.auth.getCurrentUser();
+
+        if (!mounted) return;
+
+        if (!user) {
+          await supabase.auth.signOut();
+          setIsAuthenticated(false);
+          return;
+        }
+
         setCurrentUser(user);
-        setAllUsers(prev => prev.some(u => u.id === user.id) ? prev : [user, ...prev]);
+
+        setAllUsers(prev =>
+          prev.some(u => u.id === user.id)
+            ? prev
+            : [user, ...prev]
+        );
+
         setIsAuthenticated(true);
         loadAppData();
-      } else {
+      } catch (err) {
+        console.error('Failed to load current user:', err);
         setIsAuthenticated(false);
       }
-    }).catch(() => {
-      // API unreachable — show login page
-      setIsAuthenticated(false);
-    });
+    };
+
+    initializeAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!mounted) return;
+
+        console.log('[AUTH]', event, !!session);
+
+        if (!session) {
+          setIsAuthenticated(false);
+          return;
+        }
+
+        if (
+          event === 'SIGNED_IN' ||
+          event === 'TOKEN_REFRESHED' ||
+          event === 'INITIAL_SESSION'
+        ) {
+          setIsAuthenticated(true);
+
+          setTimeout(() => {
+            if (!mounted) return;
+
+            api.auth.getCurrentUser()
+              .then(user => {
+                if (!mounted || !user) return;
+
+                setCurrentUser(user);
+
+                setAllUsers(prev =>
+                  prev.some(u => u.id === user.id)
+                    ? prev
+                    : [user, ...prev]
+                );
+
+                loadAppData();
+              })
+              .catch(err => {
+                console.error(
+                  'Failed to load authenticated user:',
+                  err
+                );
+              });
+          }, 0);
+        }
+      }
+    );
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Modals

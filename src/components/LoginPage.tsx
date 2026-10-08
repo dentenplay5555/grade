@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabase';
 import {
   Shield,
   Chrome,
@@ -54,24 +55,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     dur: 8 + (i % 6) * 2
   }));
 
-  // ─── Google OAuth PKCE ────────────────────────────────────────────────────
-  const handleGoogleLogin = () => {
+  // ─── Google OAuth via Supabase ───────────────────────────────────────────
+  const handleGoogleLogin = async () => {
     setIsLoading(true);
     setError(null);
 
-    const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-    const state = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
 
-    sessionStorage.setItem('pkce_verifier', verifier);
-    sessionStorage.setItem('oauth_state', state);
-    sessionStorage.setItem('oauth_nonce', nonce);
-
-    const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
-    window.location.href = `${apiBase}/auth/google?state=${state}&nonce=${nonce}`;
+      if (error) {
+        throw error;
+      }
+    } catch (err: any) {
+      console.error('Google OAuth error:', err);
+      setError(err.message || 'Google login failed');
+      setIsLoading(false);
+    }
   };
 
   // ─── Email / Password ─────────────────────────────────────────────────────

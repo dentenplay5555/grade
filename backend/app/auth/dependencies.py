@@ -39,15 +39,20 @@ async def get_current_user(
             detail="Token payload missing subject identifier.",
         )
         
-    # Fetch role from Supabase DB profiles or app_metadata
+    # Fetch role and metadata from Supabase user_metadata or app_metadata
     user_metadata = payload.get("user_metadata", {})
     app_metadata = payload.get("app_metadata", {})
     role_str = app_metadata.get("role") or user_metadata.get("role", "student")
     
     role = UserRole.ADMIN if role_str == "admin" else UserRole.STUDENT
+    name = user_metadata.get("full_name") or user_metadata.get("name") or (email.split("@")[0] if email else "User")
+    avatar = user_metadata.get("avatar_url") or ""
     
     return UserSessionInfo(
         user_id=user_id,
         email=email,
-        role=role
+        role=role,
+        name=name,
+        avatar=avatar,
+        isAdmin=(role == UserRole.ADMIN)
     )

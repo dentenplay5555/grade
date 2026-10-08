@@ -1,0 +1,16 @@
+{
+  "title": "A + B Problem",
+  "slug": "a-plus-b",
+  "time_limit_ms": 1000,
+  "memory_limit_mb": 128,
+  "score": 100,
+  "is_active": true,
+  "sample_inputs": [
+    "3 4",
+    "-10 25"
+  ],
+  "sample_outputs": [
+    "7",
+    "15"
+  ]
+}

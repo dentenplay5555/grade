@@ -1,0 +1,182 @@
+# 🏗️ Architecture v1 (Final): Online Grader on Termux / Android Host
+
+สถาปัตยกรรมระบบ **Online Grader (Self-Hosted on Termux + Android Host in WLAN + Supabase Cloud Auth/DB)** 
+
+---
+
+## 1. 🌐 Network & Routing Architecture
+
+ใช้ **Caddy** เป็น Reverse Proxy ตัวเดียวที่เปิดสู่ WLAN บนพอร์ต `:8080` เพื่อตัดปัญหา CORS, ไม่ต้องจำหลายพอร์ต และซ่อน internal services ไว้ที่ `127.0.0.1`
+
+```text
+                       WLAN Clients (Laptops / Phones)
+                                     │
+                                     ▼
+                          ┌───────────────────────┐
+                          │  Android / Termux     │
+                          │      Caddy :8080      │
+                          └──────────┬────────────┘
+                                     │
+                 ┌───────────────────┼───────────────────┐
+                 ▼                   ▼                   ▼
+           /api/v1/*             /admin/*               /*
+                 │                   │                   │
+                 ▼                   ▼                   ▼
+           FastAPI Backend       Admin SPA          Student SPA
+         (127.0.0.1:8000)     (Static Build)      (Static Build)
+                 │
+                 ▼
+         Redis Queue (127.0.0.1:6379)
+                 │
+                 ▼
+          Grader Worker
+```
+
+### URL Mapping
+- **Student Web:** `http://<TERMUX-IP>:8080/`
+- **Admin Web:** `http://<TERMUX-IP>:8080/admin/`
+- **Backend API:** `http://<TERMUX-IP>:8080/api/v1/`
+- **Internal Services (ห้ามเปิดสู่ LAN):**
+  - FastAPI: `127.0.0.1:8000`
+  - Redis: `127.0.0.1:6379`
+
+---
+
+## 2. 📁 Project Structure (v1 Final)
+
+```text
+grader/
+│
+├── caddy/
+│   └── Caddyfile
+│
+├── frontend/
+│   ├── student/
+│   │   ├── src/
+│   │   ├── public/
+│   │   ├── package.json
+│   │   └── vite.config.ts
+│   │
+│   └── admin/
+│       ├── src/
+│       ├── public/
+│       ├── package.json
+│       └── vite.config.ts
+│
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   │
+│   │   ├── auth/
+│   │   │   ├── dependencies.py
+│   │   │   ├── jwt.py
+│   │   │   └── permissions.py
+│   │   │
+│   │   ├── api/
+│   │   │   └── v1/
+│   │   │       ├── problems.py
+│   │   │       ├── submissions.py
+│   │   │       └── users.py
+│   │   │
+│   │   ├── admin/
+│   │   │   └── v1/
+│   │   │       ├── problems.py
+│   │   │       ├── submissions.py
+│   │   │       ├── users.py
+│   │   │       └── system.py
+│   │   │
+│   │   ├── schemas/
+│   │   │   ├── problem.py
+│   │   │   ├── submission.py
+│   │   │   └── user.py
+│   │   │
+│   │   ├── services/
+│   │   │   ├── submission_service.py
+│   │   │   ├── queue_service.py
+│   │   │   └── problem_service.py
+│   │   │
+│   │   └── db/
+│   │       └── supabase.py
+│   │
+│   └── requirements.txt
+│
+├── worker/
+│   ├── worker.py
+│   ├── compiler.py
+│   ├── sandbox.py
+│   ├── runner.py
+│   ├── judge.py
+│   └── limits.py
+│
+├── problems/
+│   └── <problem_id>/
+│       ├── statement.md
+│       ├── config.json
+│       └── testcases/
+│           ├── 001.in
+│           ├── 001.out
+│           └── ...
+│
+├── scripts/
+│   ├── setup_termux.sh
+│   ├── build.sh
+│   ├── start.sh
+│   └── stop.sh
+│
+├── .env
+├── .gitignore
+└── README.md
+```
+
+---
+
+## 3. 🔐 Security Architecture (Defense-in-Depth)
+
+ลำดับชั้นการป้องกันแบบหลายระดับ:
+
+```text
+1. Google OAuth / Supabase Auth (ยืนยันตัวตน)
+     ↓
+2. JWT Verification (ตรวจสอบความถูกต้องของ Token)
+     ↓
+3. Backend RBAC (ตรวจสอบ Role: student vs admin)
+     ↓
+4. Pydantic Validation (กรอง Schema & Payload Size)
+     ↓
+5. Rate Limiting (จำกัดความถี่การยิง Request / User / IP)
+     ↓
+6. Redis Queue (ควบคุม Concurrency ไม่ให้ Server Overload)
+     ↓
+7. Worker Privilege Isolation (รันด้วย Least Privilege)
+     ↓
+8. Resource Limits (setrlimit CPU, RAM, Process Count, Timeout)
+     ↓
+9. PRoot Filesystem Restriction (จำกัดขอบเขตการเข้าถึง File System)
+     ↓
+10. Stdin ➔ Stdout Only (ไม่ส่ง Path ไฟล์ Testcase จริงไปให้ Binary อ่านตรงๆ)
+     ↓
+11. Judge & Result Evaluation
+     ↓
+12. Supabase RLS (ป้องกัน Data Leakage ในระดับ Database)
+```
+
+---
+
+## 4. ⚠️ 3 จุดสำคัญเชิงเทคนิคที่ต้องยึดถือ (Core Rules)
+
+### 1) Google OAuth + Local WLAN Callback
+- ห้ามหวังพึ่งพา `http://192.168.x.x` เป็น OAuth Redirect URI ตรงๆ กับ Google OAuth
+- **แนวทางปฏิบัติ:**
+  - กำหนด Redirect URI ชี้ไปที่ Supabase Auth Callback Domain (`https://<project-ref>.supabase.co/auth/v1/callback`)
+  - ให้ Supabase Auth Redirect กลับมาที่ Frontend Callback ผ่าน URL ที่ตั้งค่าไว้ใน Supabase URL Allowlist หรือใช้ mDNS/Local Domain/Cloudflare Tunnel รองรับ HTTPS callback
+
+### 2) Secret Separation & Least Privilege Worker
+- **Frontend:** ได้เฉพาะ `SUPABASE_ANON_KEY` และสื่อสารผ่าน Supabase RLS เท่านั้น
+- **Backend / Worker:** เก็บ `SUPABASE_SERVICE_ROLE_KEY` ไว้เฉพาะ Server-side
+- **Worker Isolation:** Worker ทำหน้าที่ Consume task จาก Redis ➔ สร้าง Temporary Workspace ➔ คอมไพล์ ➔ รันผ่าน `stdin` ➔ เปรียบเทียบผลลัพธ์ ➔ ลบ Temporary Workspace ทิ้งทันที
+
+### 3) ข้อจำกัดของ Sandbox บน Non-Root Android
+- **ยอมรับความเป็นจริง:** PRoot + `setrlimit` ไม่ใช่ Kernel-level Isolation (ไม่มี cgroups/namespaces แท้จริง)
+- **การใช้งาน v1:** เหมาะสำหรับใช้แข่งขัน/เรียนในแล็บ WLAN ที่มีการระบุตัวตนผู้ใช้ชัดเจน
+- **Future Roadmap:** หากต้องการเปิดเป็น Public Grader รองรับ untrusted code 100% ให้แยก Worker Process ไปรันบน Linux VM/Container ที่มี Kernel Isolation (nsjail/isolate/docker) โดยที่ Backend และ DB ยังคงอยู่บนสถาปัตยกรรมเดิมได้ทันที

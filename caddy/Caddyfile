@@ -1,0 +1,36 @@
+:8080 {
+    # Encode responses (gzip, zstd) for fast loading over WLAN
+    encode zstd gzip
+
+    # API Proxy to FastAPI Backend
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # Admin API Proxy
+    handle /admin/v1/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # Admin Web SPA
+    handle /admin/* {
+        root * frontend/admin/dist
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Student Web SPA (Default)
+    handle {
+        root * dist
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Security Headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

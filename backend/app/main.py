@@ -12,13 +12,14 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if settings.DEBUG else None,
 )
 
-# CORS Middleware (Primarily for local development when not proxied by Caddy)
+# CORS Middleware: Only wide-open in DEBUG mode (dev only)
+# In production, Caddy handles all routing on same origin — CORS is not needed
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if settings.DEBUG else ["http://localhost:8080", "http://127.0.0.1:8080"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # User API Routes (/api/v1/...)

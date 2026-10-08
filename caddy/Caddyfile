@@ -1,8 +1,24 @@
+# =============================================================================
+# Caddyfile for Guarding Grader
+# Run: caddy run --config /path/to/guarding/caddy/Caddyfile --adapter caddyfile
+# Caddy must be started from the project root so relative paths resolve correctly.
+# Or set PROJECT_ROOT environment variable.
+# =============================================================================
+
 :8080 {
     # Encode responses (gzip, zstd) for fast loading over WLAN
     encode zstd gzip
 
-    # API Proxy to FastAPI Backend
+    # Security Headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Backend API Proxy — must come before static file handlers
     handle /api/* {
         reverse_proxy 127.0.0.1:8000
     }
@@ -12,25 +28,10 @@
         reverse_proxy 127.0.0.1:8000
     }
 
-    # Admin Web SPA
-    handle /admin/* {
-        root * frontend/admin/dist
-        try_files {path} /index.html
-        file_server
-    }
-
-    # Student Web SPA (Default)
+    # Student Web SPA (Default) — serves dist/ relative to cwd (project root)
     handle {
         root * dist
         try_files {path} /index.html
         file_server
-    }
-
-    # Security Headers
-    header {
-        X-Frame-Options "SAMEORIGIN"
-        X-XSS-Protection "1; mode=block"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
     }
 }
